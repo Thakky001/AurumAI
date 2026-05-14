@@ -11,12 +11,17 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # ─── Install Python Dependencies ─────────────────
-# Copy requirements ก่อนเพื่อใช้ Docker Cache
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir "jinja2==3.1.2" --force-reinstall
+
+# ─── Patch gradio: remove localhost accessibility check ──────────
+# Gradio 4.44 raises ValueError when HF Space proxy causes HEAD / → 500
+# patch_gradio.py replaces the raise with a no-op so launch() continues
+COPY patch_gradio.py /tmp/patch_gradio.py
+RUN python3 /tmp/patch_gradio.py
 
 # ─── Pre-download FinBERT Model ──────────────────
-# โหลด Model ตอน Build ไม่ต้องโหลดซ้ำตอน Runtime
 RUN python -c "from transformers import pipeline; pipeline('text-classification', model='ProsusAI/finbert')"
 
 # ─── Copy Source Code ────────────────────────────
@@ -24,12 +29,9 @@ COPY app.py .
 COPY smc_detector.py .
 COPY sentiment_analyzer.py .
 
-# ─── Environment Variables (Default) ─────────────
+# ─── Environment Variables ────────────────────────
 ENV PORT=7860
 ENV PYTHONUNBUFFERED=1
-# HF Space requires these for Gradio to bind correctly
-ENV GRADIO_SERVER_NAME=0.0.0.0
-ENV GRADIO_SERVER_PORT=7860
 
 # ─── Expose Port ─────────────────────────────────
 EXPOSE 7860
