@@ -330,7 +330,7 @@ def manual_sentiment(news_text: str) -> str:
     except Exception as e:
         return f"Error: {e}"
 
-with gr.Blocks(title="Gold Market AI Analyzer", theme=gr.themes.Soft()) as demo:
+with gr.Blocks(title="Gold Market AI Analyzer") as demo:
 
     gr.Markdown("""
     # 🥇 Gold Market AI Analyzer
@@ -394,4 +394,4 @@ with gr.Blocks(title="Gold Market AI Analyzer", theme=gr.themes.Soft()) as demo:
 if __name__ == "__main__":
     t = threading.Thread(target=run_bot, daemon=True)
     t.start()
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
