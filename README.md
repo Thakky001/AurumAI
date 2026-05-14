@@ -104,26 +104,79 @@ export default {
     }
 
     const body = await request.json();
-    const { token, chat_id, text } = body;
 
-    if (!token || !chat_id || !text) {
-      return new Response("Missing fields", { status: 400 });
+    // ── Mode 1: ส่ง Telegram ──────────────────────────────
+    if (body.token && body.chat_id && body.text) {
+      const { token, chat_id, text } = body;
+      const tgRes = await fetch(
+        `https://api.telegram.org/bot${token}/sendMessage`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id, text, parse_mode: "HTML" }),
+        },
+      );
+      const result = await tgRes.json();
+      return new Response(JSON.stringify(result), {
+        status: tgRes.status,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    const tgRes = await fetch(
-      `https://api.telegram.org/bot${token}/sendMessage`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id, text, parse_mode: "HTML" }),
-      },
-    );
+    // ── Mode 2: ดึง RSS feeds ─────────────────────────────
+    if (body.action === "fetch_rss") {
+      const feeds = body.feeds || [];
+      const keywords = body.keywords || [];
+      const headlines = [];
 
-    const result = await tgRes.json();
-    return new Response(JSON.stringify(result), {
-      status: tgRes.status,
-      headers: { "Content-Type": "application/json" },
-    });
+      for (const url of feeds) {
+        try {
+          const res = await fetch(url, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+            cf: { cacheTtl: 300 }, // cache 5 นาที ประหยัด quota
+          });
+          const xml = await res.text();
+
+          // parse <title> จาก <item> แบบ simple regex (ไม่ต้อง DOM parser)
+          const itemMatches = xml.matchAll(/<item[\s\S]*?<\/item>/gi);
+          for (const itemMatch of itemMatches) {
+            const item = itemMatch[0];
+            const titleMatch = item.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+            const descMatch = item.match(
+              /<description[^>]*>([\s\S]*?)<\/description>/i,
+            );
+
+            const title = titleMatch
+              ? titleMatch[1]
+                  .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+                  .trim()
+              : "";
+            const desc = descMatch
+              ? descMatch[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").trim()
+              : "";
+            const combined = (title + " " + desc).toLowerCase();
+
+            if (
+              keywords.length === 0 ||
+              keywords.some((kw) => combined.includes(kw))
+            ) {
+              if (title) headlines.push(title.slice(0, 512));
+            }
+          }
+        } catch (e) {
+          // ข้าม feed ที่ error ไปเลย ไม่ต้อง log กลับ
+        }
+      }
+
+      // deduplicate
+      const unique = [...new Set(headlines)].slice(0, 15);
+      return new Response(JSON.stringify({ headlines: unique }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response("Missing fields", { status: 400 });
   },
 };
 ```

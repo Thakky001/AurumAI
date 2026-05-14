@@ -27,8 +27,9 @@ CLOUDFLARE_RELAY = os.environ.get("CLOUDFLARE_RELAY")  # Cloudflare Worker URL
 # ─── Config ─────────────────────────────────────
 SYMBOL        = "xauusd"   # Tiingo ใช้ตัวพิมพ์เล็กและไม่มีทับ
 INTERVAL      = "15min"
-OUTPUT_SIZE   = 200        # 200 × 15min = ~50 ชั่วโมง → ~12 แท่ง H4
-POLL_SECONDS  = 90         # Tiingo free tier limit ~1 req/30s
+POLL_SECONDS  = 90         # Tiingo delay ~90s — scan ถี่กว่านี้ไม่มีประโยชน์
+MIN_BARS      = 35         # ขั้นต่ำสำหรับ SMC (swing_bars*2 + ob_lookback)
+BUFFER_MAX    = 500        # เก็บสูงสุด 500 bars ใน memory
 
 # Sentiment refresh ทุก 60 นาที (ประหยัดโควต้า FinBERT)
 SENTIMENT_REFRESH_MIN = 60
@@ -39,6 +40,7 @@ signal_history      = []
 current_sentiment   = {"score": 0.0, "label": "NEUTRAL", "headlines": 0}
 last_sentiment_time = None
 bot_status          = "⏳ Starting..."
+_ohlcv_buffer: pd.DataFrame | None = None   # buffer bars ใน memory
 
 detector = SMCDetector(ob_lookback=20, fvg_threshold=0.3,
                        wick_ratio=1.5, swing_bars=5, rr_ratio=2.0)
@@ -75,17 +77,25 @@ def should_refresh_sentiment() -> bool:
     return diff >= SENTIMENT_REFRESH_MIN
 
 def fetch_ohlcv() -> pd.DataFrame | None:
-    """ดึงข้อมูลราคาจาก Tiingo API"""
+    """
+    ดึงข้อมูลราคา M15 จาก Tiingo แบบ buffer
+    - ครั้งแรก: ดึง 5 วัน (warmup)
+    - ครั้งต่อไป: ดึงแค่ 2 วัน แล้ว merge เข้า buffer
+    → ลด payload จาก ~480 rows เหลือ ~192 rows ต่อ call
+    """
+    global _ohlcv_buffer
+
     if not TIINGO_API_KEY:
         add_log("⚠️ ขาด TIINGO_API_KEY")
-        return None
+        return _ohlcv_buffer
+
+    # warmup ดึง 5 วัน, หลังจากนั้นดึงแค่ 2 วัน
+    lookback_days = 5 if _ohlcv_buffer is None else 2
+    start_date = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
     url     = f"https://api.tiingo.com/tiingo/fx/{SYMBOL}/prices"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Token {TIINGO_API_KEY}"
-    }
-    start_date = (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%d")
+    headers = {"Content-Type": "application/json",
+               "Authorization": f"Token {TIINGO_API_KEY}"}
     params  = {"resampleFreq": INTERVAL, "format": "json", "startDate": start_date}
 
     try:
@@ -94,19 +104,26 @@ def fetch_ohlcv() -> pd.DataFrame | None:
         data = r.json()
 
         if not data:
-            return None
+            return _ohlcv_buffer
 
-        df = pd.DataFrame(data)
-        df["datetime"] = pd.to_datetime(df["date"])
-        df = df.set_index("datetime").sort_index()
-
+        new_df = pd.DataFrame(data)
+        new_df["datetime"] = pd.to_datetime(new_df["date"], utc=True)
+        new_df = new_df.set_index("datetime").sort_index()
         for col in ["open", "high", "low", "close"]:
-            df[col] = df[col].astype(float)
+            new_df[col] = new_df[col].astype(float)
 
-        return df
+        if _ohlcv_buffer is None:
+            _ohlcv_buffer = new_df
+        else:
+            combined      = pd.concat([_ohlcv_buffer, new_df])
+            combined      = combined[~combined.index.duplicated(keep="last")]
+            _ohlcv_buffer = combined.sort_index().iloc[-BUFFER_MAX:]
+
+        return _ohlcv_buffer
+
     except Exception as e:
         add_log(f"❌ Fetch error (Tiingo): {e}")
-        return None
+        return _ohlcv_buffer
 
 # ─── Telegram (ผ่าน Cloudflare relay หรือ direct) ──
 def _send_via_relay(text: str, retries: int = 3) -> bool:
@@ -192,7 +209,7 @@ def send_telegram(signal: dict, sentiment: dict) -> bool:
 
 # ─── Main Bot Loop ───────────────────────────────
 def run_bot():
-    global bot_status, current_sentiment, last_sentiment_time
+    global bot_status, current_sentiment, last_sentiment_time, _ohlcv_buffer
 
     add_log("🚀 Gold Market AI Analyzer started (24/5 Mode)")
     add_log("🤖 FinBERT model ready")
@@ -249,7 +266,14 @@ def run_bot():
                 time.sleep(POLL_SECONDS)
                 continue
 
-            last_price = df["close"].iloc[-1]
+            # ── MIN_BARS guard ──
+            if len(df) < MIN_BARS:
+                eta = (MIN_BARS - len(df)) * 15
+                add_log(f"⏳ Buffer: {len(df)}/{MIN_BARS} bars (~{eta} นาที)")
+                time.sleep(POLL_SECONDS)
+                continue
+
+            last_price = df["close"].iloc[-1]  # bar ปิดล่าสุด (อ้างอิงเท่านั้น)
 
             # ── SMC Analysis ──
             signal = detector.analyze(df)
