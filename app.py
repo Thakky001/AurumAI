@@ -381,15 +381,19 @@ with gr.Blocks(title="Gold Market AI Analyzer") as demo:
                 inputs=news_input,
                 outputs=result_box
             )
-            gr.Markdown(
-                "**ตัวอย่างข่าว (คัดลอกแล้ววางในช่องด้านบน):**\n"
-                "- Gold prices surge as Fed signals rate cuts amid inflation concerns\n"
-                "- Dollar strengthens, gold falls as US jobs data beats expectations\n"
-                "- Central banks continue buying gold at record pace this quarter"
+            gr.Examples(
+                examples=[
+                    ["Gold prices surge as Fed signals rate cuts amid inflation concerns"],
+                    ["Dollar strengthens, gold falls as US jobs data beats expectations"],
+                    ["Central banks continue buying gold at record pace this quarter"],
+                ],
+                inputs=news_input
             )
 
 # ─── Start ───────────────────────────────────────
 if __name__ == "__main__":
     t = threading.Thread(target=run_bot, daemon=True)
     t.start()
-    demo.launch(server_name="0.0.0.0", server_port=7860, share=False, show_error=True, ssr_mode=False)
+    demo.launch(server_name="0.0.0.0", server_port=7860, prevent_thread_lock=True)
+    # Keep process alive for HF Space
+    threading.Event().wait()

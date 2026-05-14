@@ -27,6 +27,9 @@ COPY sentiment_analyzer.py .
 # ─── Environment Variables (Default) ─────────────
 ENV PORT=7860
 ENV PYTHONUNBUFFERED=1
+# HF Space requires these for Gradio to bind correctly
+ENV GRADIO_SERVER_NAME=0.0.0.0
+ENV GRADIO_SERVER_PORT=7860
 
 # ─── Expose Port ─────────────────────────────────
 EXPOSE 7860
