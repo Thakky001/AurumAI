@@ -9,6 +9,7 @@ import gradio as gr
 
 from smc_detector       import SMCDetector
 from sentiment_analyzer import SentimentAnalyzer
+from datetime import timedelta
 
 # ─── Logging ────────────────────────────────────
 logging.basicConfig(
@@ -27,7 +28,7 @@ CLOUDFLARE_RELAY = os.environ.get("CLOUDFLARE_RELAY")  # Cloudflare Worker URL
 SYMBOL        = "xauusd"   # Tiingo ใช้ตัวพิมพ์เล็กและไม่มีทับ
 INTERVAL      = "15min"
 OUTPUT_SIZE   = 200        # 200 × 15min = ~50 ชั่วโมง → ~12 แท่ง H4
-POLL_SECONDS  = 30         # Tiingo free tier limit ~1 req/30s
+POLL_SECONDS  = 90         # Tiingo free tier limit ~1 req/30s
 
 # Sentiment refresh ทุก 60 นาที (ประหยัดโควต้า FinBERT)
 SENTIMENT_REFRESH_MIN = 60
@@ -84,7 +85,8 @@ def fetch_ohlcv() -> pd.DataFrame | None:
         "Content-Type": "application/json",
         "Authorization": f"Token {TIINGO_API_KEY}"
     }
-    params  = {"resampleFreq": INTERVAL, "format": "json"}
+    start_date = (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%d")
+    params  = {"resampleFreq": INTERVAL, "format": "json", "startDate": start_date}
 
     try:
         r = requests.get(url, headers=headers, params=params, timeout=10)
