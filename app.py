@@ -19,16 +19,16 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ─── ENV ────────────────────────────────────────
-POLYGON_API_KEY  = os.environ.get("POLYGON_API_KEY")
+TIINGO_API_KEY   = os.environ.get("TIINGO_API_KEY")
 TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID          = os.environ.get("CHAT_ID")
 CLOUDFLARE_RELAY = os.environ.get("CLOUDFLARE_RELAY")  # Cloudflare Worker URL
 
 # ─── Config ─────────────────────────────────────
-SYMBOL        = "C:XAUUSD"  # Polygon.io forex ticker format
-INTERVAL      = 15          # นาที (15-minute bars)
-OUTPUT_SIZE   = 200         # 200 × 15min = ~50 ชั่วโมง → ~12 แท่ง H4
-POLL_SECONDS  = 12          # Polygon free tier = 5 req/min → scan ทุก 12 วินาที
+SYMBOL        = "xauusd"   # Tiingo ใช้ตัวพิมพ์เล็กและไม่มีทับ
+INTERVAL      = "15min"
+OUTPUT_SIZE   = 200        # 200 × 15min = ~50 ชั่วโมง → ~12 แท่ง H4
+POLL_SECONDS  = 90         # Tiingo free tier limit ~1 req/30s
 
 # Sentiment refresh ทุก 60 นาที (ประหยัดโควต้า FinBERT)
 SENTIMENT_REFRESH_MIN = 60
@@ -75,53 +75,37 @@ def should_refresh_sentiment() -> bool:
     return diff >= SENTIMENT_REFRESH_MIN
 
 def fetch_ohlcv() -> pd.DataFrame | None:
-    """ดึงข้อมูลราคาจาก Polygon.io API (forex aggregates)"""
-    if not POLYGON_API_KEY:
-        add_log("⚠️ ขาด POLYGON_API_KEY")
+    """ดึงข้อมูลราคาจาก Tiingo API"""
+    if not TIINGO_API_KEY:
+        add_log("⚠️ ขาด TIINGO_API_KEY")
         return None
 
-    # ดึง 5 วันย้อนหลัง (รองรับ weekend + วันหยุด)
-    date_to   = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    date_from = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
-
-    url = (
-        f"https://api.polygon.io/v2/aggs/ticker/{SYMBOL}/range/{INTERVAL}/minute"
-        f"/{date_from}/{date_to}"
-    )
-    params = {
-        "adjusted": "true",
-        "sort":     "asc",
-        "limit":    OUTPUT_SIZE,
-        "apiKey":   POLYGON_API_KEY,
+    url     = f"https://api.tiingo.com/tiingo/fx/{SYMBOL}/prices"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Token {TIINGO_API_KEY}"
     }
+    start_date = (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%d")
+    params  = {"resampleFreq": INTERVAL, "format": "json", "startDate": start_date}
 
     try:
-        r = requests.get(url, params=params, timeout=10)
+        r = requests.get(url, headers=headers, params=params, timeout=10)
         r.raise_for_status()
-        body = r.json()
+        data = r.json()
 
-        results = body.get("results")
-        if not results:
-            add_log(f"⚠️ Polygon: no results (status={body.get('status')})")
+        if not data:
             return None
 
-        df = pd.DataFrame(results)
-
-        # Polygon คืน timestamp เป็น Unix ms → แปลงเป็น datetime UTC
-        df["datetime"] = pd.to_datetime(df["t"], unit="ms", utc=True)
+        df = pd.DataFrame(data)
+        df["datetime"] = pd.to_datetime(df["date"])
         df = df.set_index("datetime").sort_index()
-
-        # rename Polygon columns → ชื่อมาตรฐาน OHLCV
-        df = df.rename(columns={"o": "open", "h": "high", "l": "low",
-                                 "c": "close", "v": "volume"})
 
         for col in ["open", "high", "low", "close"]:
             df[col] = df[col].astype(float)
 
         return df
-
     except Exception as e:
-        add_log(f"❌ Fetch error (Polygon): {e}")
+        add_log(f"❌ Fetch error (Tiingo): {e}")
         return None
 
 # ─── Telegram (ผ่าน Cloudflare relay หรือ direct) ──
@@ -156,7 +140,7 @@ def notify_session_start():
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🕐 <b>เวลา:</b> {thai:02d}:{now.minute:02d} น. (ไทย)\n"
         f"📡 <b>Mode:</b> 24/5 (Forex Market Hours)\n"
-        f"⚡ <b>Scan:</b> ทุก 12 วินาที (M15 Entry / H4 Zone)\n"
+        f"⚡ <b>Scan:</b> ทุก 30 วินาที (M15 Entry / H4 Zone)\n"
         f"🧠 <b>Sentiment:</b> {current_sentiment['label']} "
         f"({current_sentiment['score']:+.2f})\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
