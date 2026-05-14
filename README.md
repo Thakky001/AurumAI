@@ -12,7 +12,7 @@
 | -------------------- | ------------------------------------------ | ---------- |
 | Telegram Account     | [telegram.org](https://telegram.org)       | ฟรี        |
 | GitHub Account       | [github.com](https://github.com)           | ฟรี        |
-| Tiingo Account       | [tiingo.com](https://tiingo.com)           | ฟรี        |
+| Polygon.io Account   | [polygon.io](https://polygon.io)           | ฟรี        |
 | Cloudflare Account   | [cloudflare.com](https://cloudflare.com)   | ฟรี        |
 | Hugging Face Account | [huggingface.co](https://huggingface.co)   | ฟรี        |
 | UptimeRobot Account  | [uptimerobot.com](https://uptimerobot.com) | ฟรี        |
@@ -64,19 +64,20 @@ https://api.telegram.org/botYOUR_TOKEN/getUpdates
 
 ---
 
-### Phase 2 — สมัคร Tiingo API
+### Phase 2 — สมัคร Polygon.io API
 
-1. ไปที่ **tiingo.com** กด **Sign Up** (ฟรี)
+1. ไปที่ **polygon.io** กด **Get Started Free** (ฟรี)
 2. ยืนยัน Email แล้ว Login
-3. ไปที่เมนู **API** → **API Token**
-4. คัดลอก **API Token** เก็บไว้
+3. ไปที่ Dashboard → **API Keys**
+4. คัดลอก **Default Key** เก็บไว้
 
 ```
-ตัวอย่าง: a1b2c3d4e5f6789012345678abcdef1234567890
+ตัวอย่าง: abcd1234EfGhIjKlMnOpQrStUvWxYz01
 ```
 
-> **โควต้าฟรี:** 20,000 calls/ชั่วโมง ✅  
-> ระบบนี้ (scan ทุก 30 วินาที) ใช้ ~120 calls/ชั่วโมง เหลือใช้สบาย
+> **โควต้าฟรี:** 5 calls/นาที = 300 calls/ชั่วโมง ✅  
+> ระบบนี้ (scan ทุก 12 วินาที) ใช้พอดี 5 calls/นาที — ไม่เกินแน่นอน  
+> **หมายเหตุ:** ข้อมูล Forex บัญชีฟรีของ Polygon.io มี delay ~15 นาที ซึ่งเหมาะสมกับ M15 Strategy ของเรา
 
 ---
 
@@ -171,13 +172,13 @@ https://telegram-relay.ชื่อuser.workers.dev
 
 | Key                | Value                    |
 | ------------------ | ------------------------ |
-| `TIINGO_API_KEY`   | API Token จาก Phase 2    |
+| `POLYGON_API_KEY`  | API Key จาก Phase 2      |
 | `TELEGRAM_TOKEN`   | Token จาก Phase 1.1      |
 | `CHAT_ID`          | Chat ID จาก Phase 1.2    |
 | `CLOUDFLARE_RELAY` | Worker URL จาก Phase 3.2 |
 
 > ⚠️ ใช้ **Secret** ไม่ใช่ Variable เพื่อความปลอดภัย  
-> ถ้ามี `TWELVE_API_KEY` เดิมอยู่ ลบทิ้งได้เลย
+> ถ้ามี `TIINGO_API_KEY` เดิมอยู่ ลบทิ้งได้เลย
 
 **5.4 รอ Build**
 
@@ -243,7 +244,7 @@ Gold prices surge as Fed signals rate cuts
 | ช่วงเวลา (UTC)        | ช่วงเวลา (ไทย)  | สถานะ                      |
 | --------------------- | --------------- | -------------------------- |
 | อาทิตย์ 22:00 UTC     | จันทร์ 05:00 น. | 🟢 ตลาดเปิด ส่งแจ้งเตือน   |
-| จันทร์ – ศุกร์ตลอดวัน | ตลอดสัปดาห์     | ⚡ สแกนสัญญาณทุก 30 วินาที |
+| จันทร์ – ศุกร์ตลอดวัน | ตลอดสัปดาห์     | ⚡ สแกนสัญญาณทุก 12 วินาที |
 | ศุกร์ 22:00 UTC       | เสาร์ 05:00 น.  | 🔴 ตลาดปิด ส่งสรุปสัญญาณ   |
 | เสาร์ – อาทิตย์       | เสาร์ – อาทิตย์ | ⏸ พัก ตลาดปิด (Weekend)    |
 
@@ -264,14 +265,14 @@ Gold prices surge as Fed signals rate cuts
 - เช็ค `requirements.txt` ว่าครบถ้วน
 - ดู Build Log ใน HF ว่า Error อะไร
 
-**ขึ้น `⚠️ ขาด TIINGO_API_KEY` ใน Log**
+**ขึ้น `⚠️ ขาด POLYGON_API_KEY` ใน Log**
 
-- เช็คว่าตั้ง Secret ชื่อ `TIINGO_API_KEY` ถูกต้องใน HF Settings
+- เช็คว่าตั้ง Secret ชื่อ `POLYGON_API_KEY` ถูกต้องใน HF Settings
 - Rebuild Space หลังจากเพิ่ม Secret
 
 **ขึ้น `429 Too Many Requests` ใน Log**
 
-- ไม่ควรเกิดขึ้นแล้วเพราะตั้ง POLL_SECONDS = 30
+- Polygon free tier จำกัด 5 calls/นาที — ตรวจสอบว่า `POLL_SECONDS = 12` ยังอยู่ครบ
 - ถ้ายังเกิด ให้เช็คว่าไม่ได้รัน Space หลายอันพร้อมกันด้วย API Key เดียวกัน
 
 **ไม่มีสัญญาณเลย**
@@ -291,7 +292,7 @@ Gold prices surge as Fed signals rate cuts
 | บริการ             | แผน                 | ราคา         |
 | ------------------ | ------------------- | ------------ |
 | Telegram Bot       | Free                | $0           |
-| Tiingo API         | Free                | $0           |
+| Polygon.io API     | Free (5 req/min)    | $0           |
 | Cloudflare Workers | Free (100k req/วัน) | $0           |
 | Hugging Face Space | Free (CPU Basic)    | $0           |
 | UptimeRobot        | Free                | $0           |
