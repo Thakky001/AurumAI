@@ -1,5 +1,6 @@
 # 🥇 AurumAI
-> XAUUSD SMC + FinBERT Sentiment Signal Bot
+
+> XAUUSD SMC + FinBERT Sentiment Signal Bot — 24/5 Mode
 
 บอทวิเคราะห์ทองคำ (XAUUSD) แบบอัตโนมัติ โดยรวม Smart Money Concepts (SMC) เข้ากับ FinBERT Sentiment Analysis แล้วส่งสัญญาณผ่าน Telegram — ฟรีทั้งระบบ $0/เดือน
 
@@ -7,13 +8,14 @@
 
 ## สิ่งที่ต้องเตรียม
 
-| บริการ | ลิงก์สมัคร | ค่าใช้จ่าย |
-|---|---|---|
-| Telegram Account | [telegram.org](https://telegram.org) | ฟรี |
-| GitHub Account | [github.com](https://github.com) | ฟรี |
-| Twelve Data Account | [twelvedata.com](https://twelvedata.com) | ฟรี |
-| Hugging Face Account | [huggingface.co](https://huggingface.co) | ฟรี |
-| UptimeRobot Account | [uptimerobot.com](https://uptimerobot.com) | ฟรี |
+| บริการ               | ลิงก์สมัคร                                 | ค่าใช้จ่าย |
+| -------------------- | ------------------------------------------ | ---------- |
+| Telegram Account     | [telegram.org](https://telegram.org)       | ฟรี        |
+| GitHub Account       | [github.com](https://github.com)           | ฟรี        |
+| Tiingo Account       | [tiingo.com](https://tiingo.com)           | ฟรี        |
+| Cloudflare Account   | [cloudflare.com](https://cloudflare.com)   | ฟรี        |
+| Hugging Face Account | [huggingface.co](https://huggingface.co)   | ฟรี        |
+| UptimeRobot Account  | [uptimerobot.com](https://uptimerobot.com) | ฟรี        |
 
 ---
 
@@ -24,6 +26,7 @@ aurumAI/
 ├── app.py
 ├── smc_detector.py
 ├── sentiment_analyzer.py
+├── patch_gradio.py
 ├── requirements.txt
 ├── Dockerfile
 └── .dockerignore
@@ -61,23 +64,80 @@ https://api.telegram.org/botYOUR_TOKEN/getUpdates
 
 ---
 
-### Phase 2 — สมัคร Twelve Data
+### Phase 2 — สมัคร Tiingo API
 
-1. ไปที่ **twelvedata.com** กด Sign Up ฟรี
-2. ยืนยัน Email
-3. ไปที่ Dashboard → **API Keys**
-4. คัดลอก **API Key** เก็บไว้
+1. ไปที่ **tiingo.com** กด **Sign Up** (ฟรี)
+2. ยืนยัน Email แล้ว Login
+3. ไปที่เมนู **API** → **API Token**
+4. คัดลอก **API Token** เก็บไว้
 
 ```
-ตัวอย่าง: a1b2c3d4e5f6789012345678
+ตัวอย่าง: a1b2c3d4e5f6789012345678abcdef1234567890
 ```
 
-> **โควต้าฟรี:** 800 calls/วัน รีเซ็ตทุกวัน 07:00 น. (เวลาไทย)  
-> ระบบนี้ใช้ ~720 calls/วัน ✅ พอดี
+> **โควต้าฟรี:** 20,000 calls/ชั่วโมง ✅  
+> ระบบนี้ (scan ทุก 30 วินาที) ใช้ ~120 calls/ชั่วโมง เหลือใช้สบาย
 
 ---
 
-### Phase 3 — อัปโหลดโค้ดขึ้น GitHub
+### Phase 3 — สร้าง Cloudflare Worker (Telegram Relay)
+
+HF Space บล็อก outbound connection ไปยัง api.telegram.org โดยตรง จึงต้องใช้ Cloudflare Worker เป็นตัวกลางส่งข้อความ ฟรี 100,000 requests/วัน ไม่มีวันหมดอายุ
+
+**3.1 สมัครและสร้าง Worker**
+
+1. ไปที่ **cloudflare.com** → สมัครฟรี → ยืนยัน Email
+2. ใน Dashboard ไปที่ **Workers & Pages** → กด **Create**
+3. เลือก **Start with Hello World!**
+4. ตั้งชื่อ Worker เช่น `telegram-relay` → กด **Deploy**
+5. หลัง Deploy เสร็จ กด **Edit code**
+
+**3.2 วางโค้ด Worker**
+
+ลบโค้ดเดิมทั้งหมดออก แล้ววางโค้ดนี้แทน:
+
+```javascript
+export default {
+  async fetch(request) {
+    if (request.method !== "POST") {
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+
+    const body = await request.json();
+    const { token, chat_id, text } = body;
+
+    if (!token || !chat_id || !text) {
+      return new Response("Missing fields", { status: 400 });
+    }
+
+    const tgRes = await fetch(
+      `https://api.telegram.org/bot${token}/sendMessage`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id, text, parse_mode: "HTML" }),
+      },
+    );
+
+    const result = await tgRes.json();
+    return new Response(JSON.stringify(result), {
+      status: tgRes.status,
+      headers: { "Content-Type": "application/json" },
+    });
+  },
+};
+```
+
+6. กด **Deploy** อีกครั้ง
+7. คัดลอก **Worker URL** ที่แสดงด้านบน รูปแบบจะเป็น:
+
+```
+https://telegram-relay.ชื่อuser.workers.dev
+```
+
+---
+
+### Phase 4 — อัปโหลดโค้ดขึ้น GitHub
 
 1. ไปที่ **github.com** → กด **New repository**
 2. ตั้งชื่อ `aurumAI`
@@ -87,56 +147,58 @@ https://api.telegram.org/botYOUR_TOKEN/getUpdates
 
 ---
 
-### Phase 4 — Deploy บน Hugging Face
+### Phase 5 — Deploy บน Hugging Face
 
-**4.1 สร้าง Space**
+**5.1 สร้าง Space**
 
 ไปที่ **huggingface.co** → **New Space** แล้วตั้งค่าดังนี้:
 
-| หัวข้อ | ค่าที่ต้องเลือก |
-|---|---|
-| Space name | `aurumAI` |
-| License | MIT |
-| SDK | **Docker** |
-| Hardware | **CPU Basic (ฟรี)** |
-| Visibility | Private |
+| หัวข้อ     | ค่าที่ต้องเลือก     |
+| ---------- | ------------------- |
+| Space name | `aurumAI`           |
+| License    | MIT                 |
+| SDK        | **Docker**          |
+| Hardware   | **CPU Basic (ฟรี)** |
+| Visibility | Private             |
 
-**4.2 เชื่อมต่อ GitHub**
+**5.2 เชื่อมต่อ GitHub**
 
 ใน Space → แท็บ **Files** → **Connect to GitHub repository** → เลือก `aurumAI`
 
-**4.3 ตั้ง Environment Variables**
+**5.3 ตั้ง Environment Variables**
 
 ไปที่ **Settings** → **Variables and Secrets** → **New secret**:
 
-| Key | Value |
-|---|---|
-| `TWELVE_API_KEY` | API Key จาก Phase 2 |
-| `TELEGRAM_TOKEN` | Token จาก Phase 1.1 |
-| `CHAT_ID` | Chat ID จาก Phase 1.2 |
+| Key                | Value                    |
+| ------------------ | ------------------------ |
+| `TIINGO_API_KEY`   | API Token จาก Phase 2    |
+| `TELEGRAM_TOKEN`   | Token จาก Phase 1.1      |
+| `CHAT_ID`          | Chat ID จาก Phase 1.2    |
+| `CLOUDFLARE_RELAY` | Worker URL จาก Phase 3.2 |
 
-> ⚠️ ใช้ **Secret** ไม่ใช่ Variable เพื่อความปลอดภัย
+> ⚠️ ใช้ **Secret** ไม่ใช่ Variable เพื่อความปลอดภัย  
+> ถ้ามี `TWELVE_API_KEY` เดิมอยู่ ลบทิ้งได้เลย
 
-**4.4 รอ Build**
+**5.4 รอ Build**
 
 ไปที่แท็บ **App** รอประมาณ 5–10 นาที (โหลด FinBERT ~400MB)  
 เมื่อขึ้นสถานะ **Running** แสดงว่าพร้อมแล้ว ✅
 
 ---
 
-### Phase 5 — ตั้ง UptimeRobot (กัน Space หลับ)
+### Phase 6 — ตั้ง UptimeRobot (กัน Space หลับ)
 
 1. ไปที่ **uptimerobot.com** → สมัครฟรี → **Add New Monitor**
 2. ตั้งค่า:
 
-| หัวข้อ | ค่าที่ต้องใส่ |
-|---|---|
-| Monitor Type | HTTP(s) |
-| Friendly Name | AurumAI Bot |
-| URL | URL ของ HF Space คุณ |
-| Monitoring Interval | **Every 30 minutes** |
+| หัวข้อ              | ค่าที่ต้องใส่                       |
+| ------------------- | ----------------------------------- |
+| Monitor Type        | HTTP(s)                             |
+| Friendly Name       | AurumAI Bot                         |
+| URL                 | `https://ชื่อuser-aurumAI.hf.space` |
+| Monitoring Interval | **Every 15 minutes**                |
 
-> UptimeRobot จะ Ping Space ทุก 30 นาที ป้องกัน HF Pause Space
+> **วิธีหา URL ที่ถูกต้อง:** เข้า Space → กด ⋮ (สามจุด) มุมขวาบน → **Embed this Space** → คัดลอก URL รูปแบบ `*.hf.space`
 
 ---
 
@@ -147,9 +209,14 @@ https://api.telegram.org/botYOUR_TOKEN/getUpdates
 เปิดแท็บ **App** ดู Live Log ควรเห็น:
 
 ```
-[HH:MM:SS] 🚀 Gold Market AI Analyzer started
+[HH:MM:SS] 🚀 Gold Market AI Analyzer started (24/5 Mode)
 [HH:MM:SS] 🤖 FinBERT model ready
+[HH:MM:SS] ☁️ Telegram relay: Cloudflare Worker
+[HH:MM:SS] 🟢 Market Opened — Starting Scan
+[HH:MM:SS] 🔍 Scanning... price=XXXX.XX | Sentiment=NEUTRAL
 ```
+
+> ถ้าขึ้น `📡 Telegram relay: Direct` แทน แสดงว่ายังไม่ได้ตั้ง `CLOUDFLARE_RELAY`
 
 **ทดสอบ Sentiment Analyzer**
 
@@ -163,56 +230,73 @@ Gold prices surge as Fed signals rate cuts
 
 **เช็ค Telegram**
 
-รอถึง 14:00 น. (เวลาไทย) บอทจะส่งข้อความ:
+บอทจะส่งข้อความเมื่อตลาดเปิด (วันจันทร์ 05:00 น. ไทย):
 
 ```
-🟢 Bot เริ่มทำงานแล้ว
+🟢 ตลาดเปิดแล้ว — เริ่มสัปดาห์ใหม่
 ```
 
 ---
 
 ## ตารางทำงานของบอท
 
-| ช่วงเวลา (เวลาไทย) | สถานะ |
-|---|---|
-| 14:00 น. | 🟢 เริ่มทำงาน ส่งแจ้งเตือน |
-| 14:00 – 02:00 น. | 🔍 สแกนสัญญาณทุก 1 นาที |
-| 02:00 น. | 🔴 หยุดทำงาน ส่งสรุปสัญญาณ |
-| 02:00 – 14:00 น. | ⏸ พัก รอ Session ถัดไป |
-| เสาร์ – อาทิตย์ | ⏸ หยุดทั้งวัน ตลาดปิด |
+| ช่วงเวลา (UTC)        | ช่วงเวลา (ไทย)  | สถานะ                      |
+| --------------------- | --------------- | -------------------------- |
+| อาทิตย์ 22:00 UTC     | จันทร์ 05:00 น. | 🟢 ตลาดเปิด ส่งแจ้งเตือน   |
+| จันทร์ – ศุกร์ตลอดวัน | ตลอดสัปดาห์     | ⚡ สแกนสัญญาณทุก 30 วินาที |
+| ศุกร์ 22:00 UTC       | เสาร์ 05:00 น.  | 🔴 ตลาดปิด ส่งสรุปสัญญาณ   |
+| เสาร์ – อาทิตย์       | เสาร์ – อาทิตย์ | ⏸ พัก ตลาดปิด (Weekend)    |
+
+> Sentiment จะ Refresh ทุก **60 นาที** เพื่อประหยัดทรัพยากร
 
 ---
 
 ## แก้ปัญหาเบื้องต้น
 
 **บอทไม่ส่งข้อความ Telegram**
+
 - เช็ค `TELEGRAM_TOKEN` และ `CHAT_ID` ว่าใส่ถูกต้อง
+- เช็ค `CLOUDFLARE_RELAY` ว่า URL ถูกต้องและ Worker Deploy แล้ว
 - ลองพิมพ์ข้อความหาบอทใน Telegram ก่อน 1 ครั้ง
 
 **Space Build ไม่ผ่าน**
+
 - เช็ค `requirements.txt` ว่าครบถ้วน
 - ดู Build Log ใน HF ว่า Error อะไร
 
+**ขึ้น `⚠️ ขาด TIINGO_API_KEY` ใน Log**
+
+- เช็คว่าตั้ง Secret ชื่อ `TIINGO_API_KEY` ถูกต้องใน HF Settings
+- Rebuild Space หลังจากเพิ่ม Secret
+
+**ขึ้น `429 Too Many Requests` ใน Log**
+
+- ไม่ควรเกิดขึ้นแล้วเพราะตั้ง POLL_SECONDS = 30
+- ถ้ายังเกิด ให้เช็คว่าไม่ได้รัน Space หลายอันพร้อมกันด้วย API Key เดียวกัน
+
 **ไม่มีสัญญาณเลย**
-- SMC + Sentiment ต้องตรงกันทั้งคู่ สัญญาณจึงจะไม่ถี่ — ถือว่าปกติ
-- เช็ค Live Log ว่า Scanning ทำงานปกติ
+
+- SMC + Sentiment ต้องตรงกันทั้งคู่ สัญญาณจึงจะส่ง — ถือว่าปกติ
+- เช็ค Live Log ว่าขึ้น `🔍 Scanning...` ทุก 30 วินาที
 
 **Space หลับทั้งที่ตั้ง UptimeRobot แล้ว**
-- เช็ค URL ที่ใส่ใน UptimeRobot ว่าถูกต้อง
+
+- เช็ค URL ที่ใส่ใน UptimeRobot ว่าเป็น `*.hf.space` ไม่ใช่ `huggingface.co/spaces/...`
 - ลองเปลี่ยน Ping interval เป็น 15 นาที
 
 ---
 
 ## ค่าใช้จ่าย
 
-| บริการ | แผน | ราคา |
-|---|---|---|
-| Telegram Bot | Free | $0 |
-| Twelve Data | Free | $0 |
-| Hugging Face Space | Free (CPU Basic) | $0 |
-| UptimeRobot | Free | $0 |
-| GitHub | Free | $0 |
-| **รวม** | | **$0/เดือน** |
+| บริการ             | แผน                 | ราคา         |
+| ------------------ | ------------------- | ------------ |
+| Telegram Bot       | Free                | $0           |
+| Tiingo API         | Free                | $0           |
+| Cloudflare Workers | Free (100k req/วัน) | $0           |
+| Hugging Face Space | Free (CPU Basic)    | $0           |
+| UptimeRobot        | Free                | $0           |
+| GitHub             | Free                | $0           |
+| **รวม**            |                     | **$0/เดือน** |
 
 ---
 
