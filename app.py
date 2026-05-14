@@ -342,11 +342,11 @@ with gr.Blocks(title="Gold Market AI Analyzer") as demo:
 
         # ── Tab 1: Dashboard ──
         with gr.Tab("📊 Dashboard"):
-            status_md = gr.Markdown(get_status)
+            status_md = gr.Markdown(get_status())
             with gr.Row():
                 refresh_btn = gr.Button("🔄 Refresh", variant="primary")
             signal_tbl = gr.DataFrame(
-                value=get_signal_table,
+                value=get_signal_table(),
                 label="Recent Signals",
                 interactive=False
             )
@@ -361,7 +361,7 @@ with gr.Blocks(title="Gold Market AI Analyzer") as demo:
                 label="System Log",
                 lines=25,
                 interactive=False,
-                value=get_logs
+                value=get_logs()
             )
             log_btn = gr.Button("🔄 Refresh Log")
             log_btn.click(fn=get_logs, outputs=log_box)
@@ -381,17 +381,15 @@ with gr.Blocks(title="Gold Market AI Analyzer") as demo:
                 inputs=news_input,
                 outputs=result_box
             )
-            gr.Examples(
-                examples=[
-                    ["Gold prices surge as Fed signals rate cuts amid inflation concerns"],
-                    ["Dollar strengthens, gold falls as US jobs data beats expectations"],
-                    ["Central banks continue buying gold at record pace this quarter"],
-                ],
-                inputs=news_input
+            gr.Markdown(
+                "**ตัวอย่างข่าว (คัดลอกแล้ววางในช่องด้านบน):**\n"
+                "- Gold prices surge as Fed signals rate cuts amid inflation concerns\n"
+                "- Dollar strengthens, gold falls as US jobs data beats expectations\n"
+                "- Central banks continue buying gold at record pace this quarter"
             )
 
 # ─── Start ───────────────────────────────────────
 if __name__ == "__main__":
     t = threading.Thread(target=run_bot, daemon=True)
     t.start()
-    demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=False, show_error=True, ssr_mode=False)
