@@ -73,7 +73,7 @@ def should_refresh_sentiment() -> bool:
     global last_sentiment_time
     if last_sentiment_time is None:
         return True
-    diff = (datetime.now(timezone.utc) - last_sentiment_time).seconds / 60
+    diff = (datetime.now(timezone.utc) - last_sentiment_time).total_seconds() / 60
     return diff >= SENTIMENT_REFRESH_MIN
 
 def fetch_ohlcv() -> pd.DataFrame | None:
@@ -157,7 +157,7 @@ def notify_session_start():
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🕐 <b>เวลา:</b> {thai:02d}:{now.minute:02d} น. (ไทย)\n"
         f"📡 <b>Mode:</b> 24/5 (Forex Market Hours)\n"
-        f"⚡ <b>Scan:</b> ทุก 30 วินาที (M15 Entry / H4 Zone)\n"
+        f"⚡ <b>Scan:</b> ทุก 90 วินาที (M15 Entry / H4 Zone)\n"
         f"🧠 <b>Sentiment:</b> {current_sentiment['label']} "
         f"({current_sentiment['score']:+.2f})\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -227,6 +227,7 @@ def run_bot():
 
             # ── ตลาดเพิ่งเปิด ──
             if market_is_open and not market_was_open:
+                detector._reset()          # ล้าง state ค้างจากสัปดาห์ที่แล้ว
                 current_sentiment   = analyzer.get_sentiment()
                 last_sentiment_time = now_utc
                 notify_session_start()
