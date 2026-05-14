@@ -4,12 +4,11 @@ import logging
 import threading
 import requests
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import gradio as gr
 
 from smc_detector       import SMCDetector
 from sentiment_analyzer import SentimentAnalyzer
-from datetime import timedelta
 
 # ─── Logging ────────────────────────────────────
 logging.basicConfig(
@@ -19,17 +18,25 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ─── ENV ────────────────────────────────────────
-TIINGO_API_KEY   = os.environ.get("TIINGO_API_KEY")
+TWELVE_API_KEY   = os.environ.get("TWELVE_API_KEY")
 TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID          = os.environ.get("CHAT_ID")
 CLOUDFLARE_RELAY = os.environ.get("CLOUDFLARE_RELAY")  # Cloudflare Worker URL
 
 # ─── Config ─────────────────────────────────────
-SYMBOL        = "xauusd"   # Tiingo ใช้ตัวพิมพ์เล็กและไม่มีทับ
+SYMBOL        = "XAU/USD"  # Twelve Data format
 INTERVAL      = "15min"
-POLL_SECONDS  = 90         # Tiingo delay ~90s — scan ถี่กว่านี้ไม่มีประโยชน์
+POLL_SECONDS  = 60         # Twelve Data realtime — scan ทุก 60 วินาที
 MIN_BARS      = 35         # ขั้นต่ำสำหรับ SMC (swing_bars*2 + ob_lookback)
 BUFFER_MAX    = 500        # เก็บสูงสุด 500 bars ใน memory
+
+# ─── Trading Sessions (UTC) ──────────────────────
+# สแกนเฉพาะช่วงที่ทองมี volume จริง
+# London Open  : 07:00 – 16:00 UTC  (+7 = 14:00–23:00 ไทย)
+# New York Open: 12:00 – 21:00 UTC  (+7 = 19:00–04:00 ไทย)
+# รวม active   : 07:00 – 21:00 UTC  (วันจันทร์–ศุกร์)
+SESSION_START_UTC = 7   # London open
+SESSION_END_UTC   = 21  # NY close
 
 # Sentiment refresh ทุก 60 นาที (ประหยัดโควต้า FinBERT)
 SENTIMENT_REFRESH_MIN = 60
@@ -63,11 +70,19 @@ def is_market_open() -> bool:
 
     if wd == 5:               # วันเสาร์ปิดทั้งวัน
         return False
-    if wd == 6 and hr < 22:   # วันอาทิตย์เปิดตอน 22:00 UTC (ตี 5 วันจันทร์ไทย)
+    if wd == 6 and hr < 22:   # วันอาทิตย์เปิดตอน 22:00 UTC
         return False
-    if wd == 4 and hr >= 22:  # วันศุกร์ปิดตอน 22:00 UTC (ตี 5 วันเสาร์ไทย)
+    if wd == 4 and hr >= 22:  # วันศุกร์ปิดตอน 22:00 UTC
         return False
     return True
+
+def is_active_session() -> bool:
+    """
+    เช็คว่าอยู่ในช่วง London/NY session หรือไม่
+    นอกช่วงนี้ตลาดเปิดแต่ volume ต่ำ (Asian session) — หยุดสแกน ประหยัด quota
+    """
+    hr = datetime.now(timezone.utc).hour
+    return SESSION_START_UTC <= hr < SESSION_END_UTC
 
 def should_refresh_sentiment() -> bool:
     global last_sentiment_time
@@ -76,38 +91,50 @@ def should_refresh_sentiment() -> bool:
     diff = (datetime.now(timezone.utc) - last_sentiment_time).total_seconds() / 60
     return diff >= SENTIMENT_REFRESH_MIN
 
+# ─── Fetch OHLCV (Twelve Data) ───────────────────
 def fetch_ohlcv() -> pd.DataFrame | None:
     """
-    ดึงข้อมูลราคา M15 จาก Tiingo แบบ buffer
-    - ครั้งแรก: ดึง 5 วัน (warmup)
+    ดึงข้อมูลราคา M15 จาก Twelve Data แบบ buffer
+    - ครั้งแรก (warmup): ดึง 5 วัน
     - ครั้งต่อไป: ดึงแค่ 2 วัน แล้ว merge เข้า buffer
-    → ลด payload จาก ~480 rows เหลือ ~192 rows ต่อ call
+    → ลด payload และประหยัด quota
+    Twelve Data free: 8 req/min — scan ทุก 60 วิ = 1 req/min ปลอดภัย
     """
     global _ohlcv_buffer
 
-    if not TIINGO_API_KEY:
-        add_log("⚠️ ขาด TIINGO_API_KEY")
+    if not TWELVE_API_KEY:
+        add_log("⚠️ ขาด TWELVE_API_KEY")
         return _ohlcv_buffer
 
-    # warmup ดึง 5 วัน, หลังจากนั้นดึงแค่ 2 วัน
     lookback_days = 5 if _ohlcv_buffer is None else 2
-    start_date = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    start_dt  = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    start_str = start_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-    url     = f"https://api.tiingo.com/tiingo/fx/{SYMBOL}/prices"
-    headers = {"Content-Type": "application/json",
-               "Authorization": f"Token {TIINGO_API_KEY}"}
-    params  = {"resampleFreq": INTERVAL, "format": "json", "startDate": start_date}
+    url    = "https://api.twelvedata.com/time_series"
+    params = {
+        "symbol":     SYMBOL,
+        "interval":   INTERVAL,
+        "start_date": start_str,
+        "outputsize": 500,
+        "format":     "JSON",
+        "apikey":     TWELVE_API_KEY,
+    }
 
     try:
-        r = requests.get(url, headers=headers, params=params, timeout=10)
+        r = requests.get(url, params=params, timeout=10)
         r.raise_for_status()
-        data = r.json()
+        body = r.json()
 
-        if not data:
+        if body.get("status") == "error":
+            add_log(f"❌ Twelve Data error: {body.get('message', 'unknown')}")
             return _ohlcv_buffer
 
-        new_df = pd.DataFrame(data)
-        new_df["datetime"] = pd.to_datetime(new_df["date"], utc=True)
+        values = body.get("values")
+        if not values:
+            return _ohlcv_buffer
+
+        new_df = pd.DataFrame(values)
+        new_df["datetime"] = pd.to_datetime(new_df["datetime"], utc=True)
         new_df = new_df.set_index("datetime").sort_index()
         for col in ["open", "high", "low", "close"]:
             new_df[col] = new_df[col].astype(float)
@@ -122,7 +149,7 @@ def fetch_ohlcv() -> pd.DataFrame | None:
         return _ohlcv_buffer
 
     except Exception as e:
-        add_log(f"❌ Fetch error (Tiingo): {e}")
+        add_log(f"❌ Fetch error (Twelve Data): {e}")
         return _ohlcv_buffer
 
 # ─── Telegram (ผ่าน Cloudflare relay หรือ direct) ──
@@ -156,8 +183,8 @@ def notify_session_start():
         f"🟢 <b>ตลาดเปิดแล้ว — เริ่มสัปดาห์ใหม่</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🕐 <b>เวลา:</b> {thai:02d}:{now.minute:02d} น. (ไทย)\n"
-        f"📡 <b>Mode:</b> 24/5 (Forex Market Hours)\n"
-        f"⚡ <b>Scan:</b> ทุก 90 วินาที (M15 Entry / H4 Zone)\n"
+        f"📡 <b>Mode:</b> London/NY Session Only\n"
+        f"⚡ <b>Scan:</b> ทุก 60 วินาที | London 14:00–23:00 / NY 19:00–04:00 น.\n"
         f"🧠 <b>Sentiment:</b> {current_sentiment['label']} "
         f"({current_sentiment['score']:+.2f})\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -213,6 +240,7 @@ def run_bot():
 
     add_log("🚀 Gold Market AI Analyzer started (24/5 Mode)")
     add_log("🤖 FinBERT model ready")
+    add_log("📊 Data source: Twelve Data (realtime)")
     if CLOUDFLARE_RELAY:
         add_log("☁️ Telegram relay: Cloudflare Worker")
     else:
@@ -224,30 +252,42 @@ def run_bot():
         try:
             now_utc        = datetime.now(timezone.utc)
             market_is_open = is_market_open()
+            active_session = is_active_session()
 
-            # ── ตลาดเพิ่งเปิด ──
+            # ── ตลาดเพิ่งเปิด (อาทิตย์ 22:00 UTC) ──
             if market_is_open and not market_was_open:
-                detector._reset()          # ล้าง state ค้างจากสัปดาห์ที่แล้ว
+                detector._reset()           # ล้าง state ค้างจากสัปดาห์ที่แล้ว
                 current_sentiment   = analyzer.get_sentiment()
                 last_sentiment_time = now_utc
                 notify_session_start()
                 market_was_open = True
                 add_log("🟢 Market Opened — Starting Scan")
 
-            # ── ตลาดเพิ่งปิด ──
+            # ── ตลาดเพิ่งปิด (ศุกร์ 22:00 UTC) ──
             if not market_is_open and market_was_open:
                 notify_session_end()
                 market_was_open = False
                 add_log("🔴 Market Closed — Pausing Scan")
 
-            # ── นอกเวลาตลาด ──
+            # ── Weekend ──
             if not market_is_open:
                 bot_status = "⏸ Market Closed (Weekend)"
                 time.sleep(300)
                 continue
 
-            # ── ในเวลาตลาด ──
-            bot_status = "🟢 Scanning 24/5"
+            # ── Asian Session (volume ต่ำ หยุดสแกน ประหยัด quota) ──
+            if not active_session:
+                thai_hr    = (now_utc.hour + 7) % 24
+                bot_status = "😴 Asian Session — รอ London Open (14:00 น. ไทย)"
+                add_log(f"😴 Asian Session ({thai_hr:02d}:{now_utc.minute:02d} ไทย) — หยุดสแกนชั่วคราว")
+                time.sleep(300)
+                continue
+
+            # ── Active Session: London / London+NY / NY ──
+            thai_hr      = (now_utc.hour + 7) % 24
+            session_name = "London" if now_utc.hour < 12 else \
+                           "London+NY" if now_utc.hour < 16 else "New York"
+            bot_status   = f"🟢 {session_name} Session ({thai_hr:02d}:{now_utc.minute:02d} ไทย)"
 
             # ── Refresh Sentiment (ทุก 60 นาที) ──
             if should_refresh_sentiment():
@@ -274,7 +314,7 @@ def run_bot():
                 time.sleep(POLL_SECONDS)
                 continue
 
-            last_price = df["close"].iloc[-1]  # bar ปิดล่าสุด (อ้างอิงเท่านั้น)
+            last_price = df["close"].iloc[-1]
 
             # ── SMC Analysis ──
             signal = detector.analyze(df)
@@ -311,7 +351,8 @@ def run_bot():
             else:
                 add_log(
                     f"🔍 Scanning... price={last_price:.2f} | "
-                    f"Sentiment={current_sentiment['label']}"
+                    f"Sentiment={current_sentiment['label']} | "
+                    f"Session={session_name}"
                 )
 
         except Exception as e:

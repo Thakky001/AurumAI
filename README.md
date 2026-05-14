@@ -12,7 +12,7 @@
 | -------------------- | ------------------------------------------ | ---------- |
 | Telegram Account     | [telegram.org](https://telegram.org)       | ฟรี        |
 | GitHub Account       | [github.com](https://github.com)           | ฟรี        |
-| Tiingo Account       | [tiingo.com](https://tiingo.com)           | ฟรี        |
+| Twelve Data Account  | [twelvedata.com](https://twelvedata.com)   | ฟรี        |
 | Cloudflare Account   | [cloudflare.com](https://cloudflare.com)   | ฟรี        |
 | Hugging Face Account | [huggingface.co](https://huggingface.co)   | ฟรี        |
 | UptimeRobot Account  | [uptimerobot.com](https://uptimerobot.com) | ฟรี        |
@@ -64,19 +64,18 @@ https://api.telegram.org/botYOUR_TOKEN/getUpdates
 
 ---
 
-### Phase 2 — สมัคร Tiingo API
+### Phase 2 — สมัคร Twelve Data API
 
-1. ไปที่ **tiingo.com** กด **Sign Up** (ฟรี)
+1. ไปที่ **twelvedata.com** กด **Sign Up** (ฟรี)
 2. ยืนยัน Email แล้ว Login
-3. ไปที่เมนู **API** → **API Token**
-4. คัดลอก **API Token** เก็บไว้
+3. ไปที่เมนู **API Keys** → คัดลอก **API Key** เก็บไว้
 
 ```
 ตัวอย่าง: a1b2c3d4e5f6789012345678abcdef1234567890
 ```
 
-> **โควต้าฟรี:** 20,000 calls/ชั่วโมง ✅  
-> ระบบนี้ (scan ทุก 30 วินาที) ใช้ ~120 calls/ชั่วโมง เหลือใช้สบาย
+> **โควต้าฟรี:** 8 req/นาที (~800 req/วัน) ✅  
+> ระบบนี้สแกนเฉพาะ London/NY session (scan ทุก 60 วินาที) ใช้ ~840 req/วัน พอดีกับ free tier
 
 ---
 
@@ -224,7 +223,7 @@ https://telegram-relay.ชื่อuser.workers.dev
 
 | Key                | Value                    |
 | ------------------ | ------------------------ |
-| `TIINGO_API_KEY`   | API Token จาก Phase 2    |
+| `TWELVE_API_KEY`   | API Key จาก Twelve Data  |
 | `TELEGRAM_TOKEN`   | Token จาก Phase 1.1      |
 | `CHAT_ID`          | Chat ID จาก Phase 1.2    |
 | `CLOUDFLARE_RELAY` | Worker URL จาก Phase 3.2 |
@@ -293,12 +292,12 @@ Gold prices surge as Fed signals rate cuts
 
 ## ตารางทำงานของบอท
 
-| ช่วงเวลา (UTC)        | ช่วงเวลา (ไทย)  | สถานะ                      |
-| --------------------- | --------------- | -------------------------- |
-| อาทิตย์ 22:00 UTC     | จันทร์ 05:00 น. | 🟢 ตลาดเปิด ส่งแจ้งเตือน   |
-| จันทร์ – ศุกร์ตลอดวัน | ตลอดสัปดาห์     | ⚡ สแกนสัญญาณทุก 90 วินาที |
-| ศุกร์ 22:00 UTC       | เสาร์ 05:00 น.  | 🔴 ตลาดปิด ส่งสรุปสัญญาณ   |
-| เสาร์ – อาทิตย์       | เสาร์ – อาทิตย์ | ⏸ พัก ตลาดปิด (Weekend)    |
+| ช่วงเวลา (UTC)        | ช่วงเวลา (ไทย)  | สถานะ                                                   |
+| --------------------- | --------------- | ------------------------------------------------------- |
+| อาทิตย์ 22:00 UTC     | จันทร์ 05:00 น. | 🟢 ตลาดเปิด ส่งแจ้งเตือน                                |
+| จันทร์ – ศุกร์ตลอดวัน | ตลอดสัปดาห์     | ⚡ สแกนสัญญาณทุก 60 วินาที (London/NY session เท่านั้น) |
+| ศุกร์ 22:00 UTC       | เสาร์ 05:00 น.  | 🔴 ตลาดปิด ส่งสรุปสัญญาณ                                |
+| เสาร์ – อาทิตย์       | เสาร์ – อาทิตย์ | ⏸ พัก ตลาดปิด (Weekend)                                 |
 
 > Sentiment จะ Refresh ทุก **60 นาที** เพื่อประหยัดทรัพยากร
 
@@ -317,9 +316,9 @@ Gold prices surge as Fed signals rate cuts
 - เช็ค `requirements.txt` ว่าครบถ้วน
 - ดู Build Log ใน HF ว่า Error อะไร
 
-**ขึ้น `⚠️ ขาด TIINGO_API_KEY` ใน Log**
+**ขึ้น `⚠️ ขาด TWELVE_API_KEY` ใน Log**
 
-- เช็คว่าตั้ง Secret ชื่อ `TIINGO_API_KEY` ถูกต้องใน HF Settings
+- เช็คว่าตั้ง Secret ชื่อ `TWELVE_API_KEY` ถูกต้องใน HF Settings
 - Rebuild Space หลังจากเพิ่ม Secret
 
 **ขึ้น `429 Too Many Requests` ใน Log**
@@ -330,7 +329,7 @@ Gold prices surge as Fed signals rate cuts
 **ไม่มีสัญญาณเลย**
 
 - SMC + Sentiment ต้องตรงกันทั้งคู่ สัญญาณจึงจะส่ง — ถือว่าปกติ
-- เช็ค Live Log ว่าขึ้น `🔍 Scanning...` ทุก 30 วินาที
+- เช็ค Live Log ว่าขึ้น `🔍 Scanning...` ทุก 60 วินาที (เฉพาะช่วง London/NY session)
 
 **Space หลับทั้งที่ตั้ง UptimeRobot แล้ว**
 
@@ -344,7 +343,7 @@ Gold prices surge as Fed signals rate cuts
 | บริการ             | แผน                 | ราคา         |
 | ------------------ | ------------------- | ------------ |
 | Telegram Bot       | Free                | $0           |
-| Tiingo API         | Free                | $0           |
+| Twelve Data API    | Free (800 req/วัน)  | $0           |
 | Cloudflare Workers | Free (100k req/วัน) | $0           |
 | Hugging Face Space | Free (CPU Basic)    | $0           |
 | UptimeRobot        | Free                | $0           |
